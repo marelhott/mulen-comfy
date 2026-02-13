@@ -15,6 +15,7 @@ Minimal clone image based on `valyriantech/comfyui-with-flux:latest` with:
   - Jupyter runtime/config in `/workspace`
   - code-server files/config in `/workspace`
   - no-auth launch for Jupyter and code-server
+  - keeps original base startup behavior (`ai-toolkit` UI startup, optional `DOWNLOAD_*` model scripts, `check_files.sh`, `/workspace/start_user.sh`)
 
 ## Build and push without local Docker
 
