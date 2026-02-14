@@ -7,6 +7,11 @@ echo "pod started"
 WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 mkdir -p "${WORKSPACE_DIR}"
 
+# AI-Toolkit is large; persisting it by copying can fill small persistent disks.
+# Default is OFF; enable explicitly if you really want it.
+PERSIST_AI_TOOLKIT="${PERSIST_AI_TOOLKIT:-false}"
+START_AI_TOOLKIT_UI="${START_AI_TOOLKIT_UI:-false}"
+
 # Optional SSH key bootstrap (same as upstream)
 if [[ -n "${PUBLIC_KEY:-}" ]]; then
     mkdir -p ~/.ssh
@@ -23,8 +28,10 @@ else
     echo "WARN: /comfyui-on-workspace.sh not found; skipping ComfyUI workspace setup"
 fi
 
-if [[ -x /ai-toolkit-on-workspace.sh ]]; then
+if [[ "${PERSIST_AI_TOOLKIT}" == "true" ]] && [[ -x /ai-toolkit-on-workspace.sh ]]; then
     /ai-toolkit-on-workspace.sh || true
+else
+    echo "AI-Toolkit persistence disabled (set PERSIST_AI_TOOLKIT=true to enable)"
 fi
 
 # HuggingFace login (same as upstream)
@@ -36,7 +43,7 @@ else
 fi
 
 # Start AI-Toolkit UI (same as upstream, if present)
-if [[ -d "${WORKSPACE_DIR}/ai-toolkit/ui" ]]; then
+if [[ "${START_AI_TOOLKIT_UI}" == "true" ]] && [[ -d "${WORKSPACE_DIR}/ai-toolkit/ui" ]]; then
     echo "Starting AI-Toolkit UI in background on port 8675"
     cd "${WORKSPACE_DIR}/ai-toolkit/ui"
     if [[ -d .next ]] && [[ -f dist/worker.js ]]; then
