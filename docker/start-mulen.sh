@@ -1,131 +1,113 @@
-#!/usr/bin/env bash
-
-set -euo pipefail
+#!/bin/bash
 
 echo "pod started"
 
-WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
-mkdir -p "${WORKSPACE_DIR}"
-
-# AI-Toolkit is large; persisting it by copying can fill small persistent disks.
-# Default is OFF; enable explicitly if you really want it.
-PERSIST_AI_TOOLKIT="${PERSIST_AI_TOOLKIT:-false}"
-START_AI_TOOLKIT_UI="${START_AI_TOOLKIT_UI:-false}"
-
-# Optional SSH key bootstrap (same as upstream)
-if [[ -n "${PUBLIC_KEY:-}" ]]; then
+if [[ $PUBLIC_KEY ]]
+then
     mkdir -p ~/.ssh
     chmod 700 ~/.ssh
-    echo "${PUBLIC_KEY}" >> ~/.ssh/authorized_keys
-    chmod 600 ~/.ssh/authorized_keys
-    service ssh start || true
+    cd ~/.ssh
+    echo $PUBLIC_KEY >> authorized_keys
+    chmod 700 -R ~/.ssh
+    cd /
+    service ssh start
 fi
 
-# Keep base image persistence behavior (ComfyUI + ai-toolkit on /workspace).
-if [[ -x /comfyui-on-workspace.sh ]]; then
-    /comfyui-on-workspace.sh
-else
-    echo "WARN: /comfyui-on-workspace.sh not found; skipping ComfyUI workspace setup"
-fi
+# Move ComfyUI's folder to /workspace so models and all config will persist
+/comfyui-on-workspace.sh
 
-if [[ "${PERSIST_AI_TOOLKIT}" == "true" ]] && [[ -x /ai-toolkit-on-workspace.sh ]]; then
-    /ai-toolkit-on-workspace.sh || true
-else
-    echo "AI-Toolkit persistence disabled (set PERSIST_AI_TOOLKIT=true to enable)"
-fi
+# Move ai-toolkit's folder to /workspace so models and all config will persist
+/ai-toolkit-on-workspace.sh
 
-# HuggingFace login (same as upstream)
-if [[ -z "${HF_TOKEN:-}" ]] || [[ "${HF_TOKEN}" == "enter_your_huggingface_token_here" ]]; then
+#!/bin/bash
+if [[ -z "${HF_TOKEN}" ]] || [[ "${HF_TOKEN}" == "enter_your_huggingface_token_here" ]]
+then
     echo "HF_TOKEN is not set"
 else
     echo "HF_TOKEN is set, logging in..."
-    hf auth login --token "${HF_TOKEN}" || true
+    hf auth login --token ${HF_TOKEN}
 fi
 
-# Start AI-Toolkit UI (same as upstream, if present)
-if [[ "${START_AI_TOOLKIT_UI}" == "true" ]] && [[ -d "${WORKSPACE_DIR}/ai-toolkit/ui" ]]; then
+# Start AI-Toolkit UI in the background (prebuilt artifacts preferred)
+if [ -d "/workspace/ai-toolkit/ui" ]; then
     echo "Starting AI-Toolkit UI in background on port 8675"
-    cd "${WORKSPACE_DIR}/ai-toolkit/ui"
-    if [[ -d .next ]] && [[ -f dist/worker.js ]]; then
+    cd /workspace/ai-toolkit/ui
+    if [ -d .next ] && [ -f dist/worker.js ]; then
         echo "Prebuilt artifacts found. Running: npm run start"
-        nohup npm run start > "${WORKSPACE_DIR}/ai-toolkit/ui/server.log" 2>&1 &
+        nohup npm run start > /workspace/ai-toolkit/ui/server.log 2>&1 &
     else
         echo "Prebuilt artifacts not found. Falling back to: npm run build_and_start (this may take a while)"
-        nohup npm run build_and_start > "${WORKSPACE_DIR}/ai-toolkit/ui/server.log" 2>&1 &
+        nohup npm run build_and_start > /workspace/ai-toolkit/ui/server.log 2>&1 &
     fi
     cd - >/dev/null 2>&1 || true
 else
-    echo "AI-Toolkit UI directory not found at ${WORKSPACE_DIR}/ai-toolkit/ui; skipping UI startup"
+    echo "AI-Toolkit UI directory not found at /workspace/ai-toolkit/ui; skipping UI startup"
 fi
 
-# Optional download scripts (same as upstream)
-if [[ "${DOWNLOAD_WAN:-false}" == "true" ]] && [[ -x /download_wan2.1.sh ]]; then
+# Check and run the download scripts based on environment variables
+if [[ "${DOWNLOAD_WAN}" == "true" ]]; then
     /download_wan2.1.sh
 fi
 
-if [[ "${DOWNLOAD_FLUX:-false}" == "true" ]] && [[ -x /download_Files.sh ]]; then
+if [[ "${DOWNLOAD_FLUX}" == "true" ]]; then
     /download_Files.sh
 fi
 
-# Start nginx reverse proxy
-service nginx start || true
+# Start nginx as reverse proxy to enable api access
+service nginx start
 
-# Start JupyterLab without token/password on :8888
-if command -v jupyter >/dev/null 2>&1; then
-    jupyter lab \
-      --ip=0.0.0.0 \
-      --port=8888 \
-      --no-browser \
-      --allow-root \
-      --notebook-dir="${WORKSPACE_DIR}" \
-      --NotebookApp.allow_origin='*' \
-      --ServerApp.token='' \
-      --ServerApp.password='' \
-      --NotebookApp.token='' \
-      --NotebookApp.password='' \
-      > "${WORKSPACE_DIR}/jupyter.log" 2>&1 &
-    echo "JupyterLab started"
-else
-    echo "WARN: jupyter not found; skipping JupyterLab start"
+# Start JupyterLab (no password/token) on :8888
+jupyter lab \
+  --ip=0.0.0.0 \
+  --port=8888 \
+  --no-browser \
+  --allow-root \
+  --notebook-dir=/workspace \
+  --NotebookApp.allow_origin='*' \
+  --ServerApp.token='' \
+  --ServerApp.password='' \
+  --NotebookApp.token='' \
+  --NotebookApp.password='' \
+  &
+echo "JupyterLab started"
+
+# Start VS Code (code-server) without auth on :8443
+if ! command -v code-server >/dev/null 2>&1; then
+    echo "code-server not found, installing..."
+    curl -fsSL https://code-server.dev/install.sh | sh
 fi
 
-# Start code-server (VS Code) without auth on :8443
 if command -v code-server >/dev/null 2>&1; then
-    mkdir -p \
-      "${WORKSPACE_DIR}/.local/share/code-server" \
-      "${WORKSPACE_DIR}/.local/share/code-server/extensions"
+    mkdir -p /workspace/.local/share/code-server /workspace/.local/share/code-server/extensions
     code-server \
       --bind-addr 0.0.0.0:8443 \
       --auth none \
       --disable-telemetry \
-      --user-data-dir "${WORKSPACE_DIR}/.local/share/code-server" \
-      --extensions-dir "${WORKSPACE_DIR}/.local/share/code-server/extensions" \
-      "${WORKSPACE_DIR}" \
-      > "${WORKSPACE_DIR}/code-server.log" 2>&1 &
+      --user-data-dir /workspace/.local/share/code-server \
+      --extensions-dir /workspace/.local/share/code-server/extensions \
+      /workspace \
+      &
     echo "code-server started"
 else
-    echo "WARN: code-server not found; skipping code-server start"
+    echo "code-server still not available; skipping"
 fi
 
-# Run base check if present
-if [[ -x /check_files.sh ]]; then
-    bash /check_files.sh || true
-fi
+# Check if the flux model is present
+bash /check_files.sh
 
-# Activate persistent venv if present (same as upstream)
-if [[ -d "${WORKSPACE_DIR}/venv" ]]; then
+# Check if there is a venv directory, if so, activate it
+if [ -d "/workspace/venv" ]; then
     echo "venv directory found, activating it"
-    # shellcheck disable=SC1091
-    source "${WORKSPACE_DIR}/venv/bin/activate"
+    source /workspace/venv/bin/activate
 fi
 
-# Ensure user's script exists in /workspace (same as upstream)
-if [[ ! -f "${WORKSPACE_DIR}/start_user.sh" ]]; then
-    cp /start-original.sh "${WORKSPACE_DIR}/start_user.sh"
-    chmod +x "${WORKSPACE_DIR}/start_user.sh"
+# Check if user's script exists in /workspace
+if [ ! -f /workspace/start_user.sh ]; then
+    # If not, copy the original script to /workspace
+    cp /start-original.sh /workspace/start_user.sh
 fi
 
-# Execute the user's script (starts ComfyUI on 8188)
-bash "${WORKSPACE_DIR}/start_user.sh"
+# Execute the user's script
+bash /workspace/start_user.sh
 
 sleep infinity
