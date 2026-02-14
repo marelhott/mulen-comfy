@@ -1,4 +1,4 @@
-FROM valyriantech/comfyui-with-flux:latest
+FROM valyriantech/comfyui-without-flux:latest
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
